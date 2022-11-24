@@ -4,7 +4,8 @@ Require Import Setoid.
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Logic.Decidable.
 
-Require Import listidx.
+
+From networks Require Import listidx.
 
 Set Implicit Arguments.
 
@@ -100,6 +101,7 @@ Definition elem {A:Type} (s:seq A) (i:indexOf s) : A :=
     elem_unpacked (rangeproof i)
 .
 
+
 Fixpoint tail_unpacked {A:Type} (s:seq A) (n: nat)  : isinIndex s n -> seq A := 
     match s, n return  isinIndex s n -> seq A with
         | nil,_           => fun h : isinIndex nil n  => absurd_type (seq A) h (nil_impossible (n:=n))
@@ -117,16 +119,10 @@ CoFixpoint map {A B:Type} (s:seq A) (f: A->B) : seq B :=
       | cons a t => cons (f a)  (map t f)
     end.
 
-Fixpoint isPrefixOf' {A:Type} (l:list A) (s: seq A) : Prop :=
-    match l,s with
-        | List.cons a l', cons e s' => a=e /\ isPrefixOf' l' s'
-        | List.nil, nil             => True
-        | _,_                       => False
-    end.
 
 Inductive isPrefixOf {A:Type}  : list A  -> seq A -> Prop :=
-    | aze  : forall a l s, isPrefixOf' l s -> isPrefixOf (List.cons a l) (cons a s)
-    | azez : isPrefixOf List.nil nil
+    | prefixN : forall a l s, isPrefixOf l s -> isPrefixOf (List.cons a l) (cons a s)
+    | prefixO : isPrefixOf List.nil nil
 .
 
 
@@ -216,33 +212,18 @@ Variant exec_evt_t  (I O : Type) (M: list modulee)  :=
 #[global]Arguments module [I O]%type_scope [M]%list_scope m _.
 #[global]Arguments corr [I O]%type_scope [M]%list_scope _.
 
-Definition SMI_pred (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
+Definition in_SMI (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
     match e with
         | prot (p_evt_in _ _) | module _ (m_evt_out _ _ _) => True
         | _ => False
     end.
 
-Definition SMO_pred (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
+Definition in_SMO (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
     match e with
         | prot (p_evt_out _ _) | module _ (m_evt_in _ _ _) => True
         | _ => False
     end.
 
-Inductive SMO_T (I O : Type) (M: list modulee)  :=
-    | POut (p:node) (o:O)  : SMO_T I O M
-    | MIn  (m:listidx.indexOf M) (l:label) (p:node)  (i: test.I (nth_checked m)) : SMO_T I O M
-.
-
-#[global]Arguments POut [I O]%type_scope [M]%list_scope p o.
-#[global]Arguments MIn  [I O]%type_scope [M]%list_scope m l p i.
-
-Inductive SMI_T (I : Type) (M: list modulee)  :=
-    | PIn (p:node) (i:I)  : SMI_T I M
-    | MOut (m:listidx.indexOf M) (l:label) (p:node)  (o: test.O (nth_checked m)) : SMI_T I M
-.
-
-#[global]Arguments PIn  [I]%type_scope [M]%list_scope p i.
-#[global]Arguments MOut [I]%type_scope [M]%list_scope m l p o.
 
 Record Protocol := {
     Ip : Type;
@@ -250,11 +231,12 @@ Record Protocol := {
     M : list modulee;
     protocol_io := protocol_io_t Ip Op;
     exec_evt := exec_evt_t Ip Op M;
-    SMI := {e:exec_evt | SMI_pred e};
-    SMO := {e:exec_evt | SMO_pred e};
+    SMI := {e:exec_evt | in_SMI e};
+    SMO := {e:exec_evt | in_SMO e};
     SM : stateMachine SMI SMO;
 }. 
 
+(* in view of p means it's an input/output of p  *)
 Definition isInNodeView (P:Protocol) (e:exec_evt P) (p:node) : Prop :=
     match e with 
         | prot (p_evt_in p _)  | module _ (m_evt_out _ p _)
@@ -262,10 +244,26 @@ Definition isInNodeView (P:Protocol) (e:exec_evt P) (p:node) : Prop :=
         | _ => False
 end.
 
+Lemma view_subset_SMIO (P:Protocol) (e:exec_evt P) (p:node) : isInNodeView e p -> {in_SMI e} + {in_SMO e} .
+Proof.
+    intros. unfold isInNodeView in H.
+    repeat match goal with 
+    | s : match ?a with _ => _ end |- _ =>  destruct a; try contradiction
+    end.
+    all: simpl;auto.
+Qed.
 
-Lemma SMI_pred_dec (P:Protocol) (e:exec_evt P) :  {SMI_pred e} + {~SMI_pred e}.
+Lemma isInNodeView_dec (P:Protocol) (e:exec_evt P) (p:node) : {isInNodeView e p} + {~isInNodeView e p}.
+Proof.
+    unfold isInNodeView. destruct e.
+    - destruct p0. all: auto.
+    - destruct m0. all: auto.
+    - auto.
+Qed.
+
+Lemma in_SMI_dec (P:Protocol) (e:exec_evt P) :  {in_SMI e} + {~in_SMI e}.
 Proof. 
-    unfold decidable. unfold SMI_pred. destruct e. 
+    unfold in_SMI. destruct e. 
     - destruct p. all: auto. 
     - destruct m0. all: auto. 
     - auto.
@@ -307,14 +305,14 @@ Require Import Coq.Program.Wf.
 
 
 (* the sate at the nth event is the state right *before* the nth event is processed *)
-(* for the recursive call is bascally a destruct on (rangeproof i) *)
+(* the recursive call is bascally a destruct on (rangeproof i) *)
 Program Fixpoint state_at (P:Protocol) (E : execs P) (i: indexOf E) (p:node) {measure (index i)} : State (SM P) :=
     match index i as n return isinIndex E n -> index i = n -> State (SM P) with
         | 0     => fun _ _ => S0 (SM P) 
         | S n'  => fun (p_in : isinIndex E (S n')) (_ : index i = (S n') ) => let prev_state := (state_at (mkIndex (skip_one p_in)) p) in 
-            match (SMI_pred_dec (elem i)) with 
-                | left pSMI    => snd (transition (SM P) prev_state (exist _ _ pSMI))
-                | right pNegSMI => prev_state
+            match (in_SMI_dec (elem i)), (isInNodeView_dec (elem i) p) with  (* only process input in view *)
+                | left pSMI, left pNodeView => snd (transition (SM P) prev_state (exist _ _ pSMI))
+                | _, _                      => prev_state
             end
     end (rangeproof i) (eq_refl (index i)).
 Next Obligation. rewrite H. auto. Defined.
@@ -361,14 +359,14 @@ Definition honest (P:Protocol) (E:execs P)  (p:node) : Prop :=
 
 
 
-(* Definition honest_admissible (P:Protocol) (E:execs P) : Prop := 
+Definition honest_admissible (P:Protocol) (E:execs P) : Prop := 
     forall (i : indexOf E), match elem i with
         |  prot (p_evt_in p ip) | module _ (m_evt_out _ p ip) => 
             isPrefixOf (process (SM P) 
                                 (List.cons (nth (listidx.mkIndex (listidx.IO (List.map O (M P)) (Ip P))) ip) List.nil)) 
                        (tail i)
         | _ => False
-        end.  *)
+        end.  
 
     
 Definition model (P:Protocol) (E:execs P) : Prop := module_admissible E.
