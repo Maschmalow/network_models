@@ -1,134 +1,15 @@
 Require Import String.
 
-Require Import Setoid.
-Require Import Coq.Arith.PeanoNat.
-Require Import Coq.Logic.Decidable.
+(* Require Import Setoid. *)
+(* Require Import Coq.Arith.PeanoNat. *)
+(* Require Import Coq.Logic.Decidable. *)
 
 
 From networks Require Import listidx.
+From networks Require Import sequences.
 
 Set Implicit Arguments.
 
-Section sequences.
-    
-
-CoInductive seq (A:Type) : Type := 
-  | nil : seq A
-  | cons : A -> seq A -> seq A
-.
- 
-Arguments nil {A}. 
-
-Inductive  isinIndex {A:Type} : seq A -> nat ->  Prop :=
-    | IO : forall a s, isinIndex (cons a s) O
-    | IN : forall a s n,  isinIndex s n ->  isinIndex (cons a s) (S n)
-. 
-
-
-Lemma nil_impossible {A:Type} (n:nat) :  ~isinIndex (A:=A) nil n.
-Proof.
-    unfold "~". intros. inversion H. 
-Qed.
-
-Lemma step_back {A:Type} (a:A) (s:seq A) (n: nat)  : isinIndex (cons a s) (S n) -> isinIndex s n.
-Proof.
-    intros.  inversion H. exact H1. 
-Qed.
-
-Lemma switch {A:Type} (a0 a1:A) (s:seq A) (n: nat) : isinIndex (cons a0  (cons a1 s)) n -> isinIndex (cons a1  (cons a0 s)) n.
-Proof.
-    intros.  induction n.  apply IO.  apply step_back in H. induction n. apply IN. apply IO. apply step_back in H. 
-    apply (IN a1 (IN a0 H)).
-Qed.
-
-
-Theorem add_one (A:Type) (s:seq A) (n: nat) (a:A) : isinIndex s n  -> isinIndex (cons a s) n.
-Proof.
-    intros. induction H. apply IO. apply (IN a0) in IHisinIndex. apply (switch IHisinIndex).
-Qed.
-
-Theorem skip_one (A:Type) (s:seq A) (n: nat) : isinIndex s (S n ) -> isinIndex s n.
-Proof.
-    intros. destruct s. apply nil_impossible in H. contradiction. apply step_back in H. apply (add_one a) in H. apply H.
-Qed.
-
-
-
-
-Definition indexOf {A:Type} (s:seq A)  := { n:nat | isinIndex s n}.
-Definition index  {A:Type} {l:seq A} (i:indexOf l) := proj1_sig i.
-Definition rangeproof  {A:Type} {l:seq A} (i:indexOf l) := proj2_sig i.
-Definition mkIndex {A:Type} (l:seq A) (n:nat) (p:isinIndex l n) : indexOf l := (exist (fun x => isinIndex l x) n p).
-(* Coercion index : indexOf >-> nat. *)
-
-
-
-(* 
-Definition destructIndex {A:Type} {s:seq A} (i:indexOf s) :  
-    (index i = 0) + (exists (a:A) (n:nat) (p:isinIndex (cons a s) (S n)), (index i = S n)).
-Proof.
-    destruct i. simpl. destruct x. auto. right.  destruct s. apply nil_impossible in i. contradiction.
-    exists a. exists x.  *)
-     
-
-
-Theorem absurd_type : forall (A:Prop) (C:Type), A -> ~ A -> C.
-Proof.
-  intros A C h1 h2.
-  apply False_rect.
-  apply (h2 h1).
-Qed.
-
-Fixpoint trim_unpacked {A:Type} (s:seq A) (n: nat)  : isinIndex s n -> (A * seq A) := 
-    match s, n return  isinIndex s n ->  (A * seq A) with
-        | nil,_           => fun h : isinIndex nil n              => absurd_type _ h (nil_impossible (n:=n))
-        | cons a s', S n' => fun h : isinIndex (cons a s') (S n') => trim_unpacked (step_back h)
-        | cons a s', 0    => fun _                                =>  pair a s'
-    end.
-
-Definition trim {A:Type} (s:seq A) (i:indexOf s) : (A * seq A) := 
-    trim_unpacked (rangeproof i)
-.
-
-Fixpoint elem_unpacked {A:Type} (s:seq A) (n: nat)  : isinIndex s n -> A := 
-    match s, n return  isinIndex s n ->  A with
-        | nil,_ => fun h : isinIndex nil n  => absurd_type A h (nil_impossible (n:=n))
-        | cons a s', S n' => fun h :  isinIndex (cons a s') (S n') => elem_unpacked (step_back h)
-        | cons a s', 0 => fun h :  isinIndex (cons a s') 0 =>  a
-    end.
-
-Definition elem {A:Type} (s:seq A) (i:indexOf s) : A := 
-    elem_unpacked (rangeproof i)
-.
-
-
-Fixpoint tail_unpacked {A:Type} (s:seq A) (n: nat)  : isinIndex s n -> seq A := 
-    match s, n return  isinIndex s n -> seq A with
-        | nil,_           => fun h : isinIndex nil n  => absurd_type (seq A) h (nil_impossible (n:=n))
-        | cons a s', S n' => fun h :  isinIndex (cons a s') (S n') => tail_unpacked (step_back h)
-        | cons a s', 0    => fun h :  isinIndex (cons a s') 0 =>  s'
-    end.
-
-Definition tail {A:Type} (s:seq A) (i:indexOf s) : seq A := 
-    tail_unpacked (rangeproof i)
-.
-
-CoFixpoint map {A B:Type} (s:seq A) (f: A->B) : seq B :=
-    match s with
-      | nil => nil
-      | cons a t => cons (f a)  (map t f)
-    end.
-
-
-Inductive isPrefixOf {A:Type}  : list A  -> seq A -> Prop :=
-    | prefixN : forall a l s, isPrefixOf l s -> isPrefixOf (List.cons a l) (cons a s)
-    | prefixO : isPrefixOf List.nil nil
-.
-
-
-Definition subseq {A:Type} (s:seq A) (P: A -> Prop) := { i:indexOf s | P (elem i)}.
-
-End sequences.
 
 Variable nodeCount : nat.
 Definition node := { n:nat | n < nodeCount}.
@@ -152,7 +33,7 @@ Inductive corruption_evt   :=
 .
 
 
-Record modulee : Type :=  {
+Record module : Type :=  {
     l : label;
     I : Type;
     O : Type;
@@ -176,20 +57,6 @@ Record stateMachine (I O : Type) :Type := {
 }.
 
 
-Fixpoint processState {I O : Type} (SM : stateMachine I O) (inputs : list I) : State SM := 
-    match inputs with
-        | List.nil => S0 SM
-        | List.cons i inputs' => snd (transition SM (processState SM inputs') i)
-    end.    
-    
-Fixpoint process {I O : Type} (SM : stateMachine I O) (inputs : list I) : list O := 
-    match inputs with
-        | List.nil => List.nil
-        | List.cons i inputs' => List.cons (fst (transition SM (processState SM inputs') i))
-                                          (process SM inputs') 
-    end.
-
-
 End StateMachines.
 
 Section Protocols.
@@ -203,52 +70,76 @@ Variant protocol_io_t (I O : Type) :=
 #[global]Arguments p_evt_in [I]%type_scope [O]%type_scope _ _.
 #[global]Arguments p_evt_out [I]%type_scope [O]%type_scope _ _.
 
-Variant exec_evt_t  (I O : Type) (M: list modulee)  :=
+
+
+Variant exec_evt_t  (I O : Type) (M: list module)  :=
     | prot : protocol_io_t I O -> exec_evt_t I O M
-    | module (m : listidx.indexOf M) : module_io (nth_checked m) -> exec_evt_t I O M
+    | mod (m : listidx.indexOf M) : module_io (nth_checked m) -> exec_evt_t I O M
     | corr : corruption_evt -> exec_evt_t I O M
 .
+
+
 #[global]Arguments prot [I O]%type_scope [M]%list_scope _.
-#[global]Arguments module [I O]%type_scope [M]%list_scope m _.
+#[global]Arguments mod [I O]%type_scope [M]%list_scope m _.
 #[global]Arguments corr [I O]%type_scope [M]%list_scope _.
-
-Definition in_SMI (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
+(*
+ Definition in_SMI_t (I O : Type) (M: list module) (e:exec_evt_t I O M) : Prop := 
     match e with
-        | prot (p_evt_in _ _) | module _ (m_evt_out _ _ _) => True
+        | prot (p_evt_in _ _) | mod _ (m_evt_out _ _ _) => True
         | _ => False
     end.
 
-Definition in_SMO (I O : Type) (M: list modulee) (e:exec_evt_t I O M) : Prop := 
+Definition in_SMO_t (I O : Type) (M: list module) (e:exec_evt_t I O M) : Prop := 
     match e with
-        | prot (p_evt_out _ _) | module _ (m_evt_in _ _ _) => True
+        | prot (p_evt_out _ _) | mod _ (m_evt_in _ _ _) => True
         | _ => False
-    end.
+    end. *)
 
 
 Record Protocol := {
     Ip : Type;
     Op : Type;
-    M : list modulee;
+    M : list module;
     protocol_io := protocol_io_t Ip Op;
-    exec_evt := exec_evt_t Ip Op M;
-    SMI := {e:exec_evt | in_SMI e};
-    SMO := {e:exec_evt | in_SMO e};
+    exec_evt := exec_evt_t Ip Op M; 
+    prot_p := prot (I:=Ip) (O:=Op) (M:=M);
+    module_p := mod (I:=Ip) (O:=Op) (M:=M);
+    corr_p := corr (I:=Ip) (O:=Op) (M:=M);
+    (* inSMI := in_SMI_t (I:=Ip) (O:=Op) (M:=M);
+    inSMO := in_SMO_t (I:=Ip) (O:=Op) (M:=M); *)
+
+    (* all definitions required to define the state machine I/O types needs to be inlined within the record def*)
+    inSMI := fun (e:exec_evt) => match e with
+                | prot (p_evt_in _ _) | mod _ (m_evt_out _ _ _) => True
+                | _ => False
+            end;
+    inSMO := fun (e : exec_evt) =>  match e with
+                | prot (p_evt_out _ _) | mod _ (m_evt_in _ _ _) => True
+                | _ => False
+              end;
+    SMI := {e:exec_evt | inSMI e};
+    SMO := list {e:exec_evt | inSMO e};
     SM : stateMachine SMI SMO;
 }. 
+
+
 
 (* in view of p means it's an input/output of p  *)
 Definition isInNodeView (P:Protocol) (e:exec_evt P) (p:node) : Prop :=
     match e with 
-        | prot (p_evt_in p _)  | module _ (m_evt_out _ p _)
-        | prot (p_evt_out p _) | module _ (m_evt_in _ p _)  => True
+        | prot (p_evt_in p _)  | mod _ (m_evt_out _ p _)
+        | prot (p_evt_out p _) | mod _ (m_evt_in _ p _)  => True
         | _ => False
 end.
 
-Lemma view_subset_SMIO (P:Protocol) (e:exec_evt P) (p:node) : isInNodeView e p -> {in_SMI e} + {in_SMO e} .
+
+
+
+Lemma view_subset_SMIO (P:Protocol) (e:exec_evt P) (p:node) : isInNodeView e p -> {inSMI e} + {inSMO e} .
 Proof.
-    intros. unfold isInNodeView in H.
+    intros. unfold isInNodeView in H. 
     repeat match goal with 
-    | s : match ?a with _ => _ end |- _ =>  destruct a; try contradiction
+    | s : match ?a with _ => _ end |- _ =>  destruct a 
     end.
     all: simpl;auto.
 Qed.
@@ -261,11 +152,11 @@ Proof.
     - auto.
 Qed.
 
-Lemma in_SMI_dec (P:Protocol) (e:exec_evt P) :  {in_SMI e} + {~in_SMI e}.
+Lemma in_SMI_dec (P:Protocol) (e:exec_evt P) :  {inSMI e} + {~inSMI e}.
 Proof. 
-    unfold in_SMI. destruct e. 
-    - destruct p. all: auto. 
-    - destruct m0. all: auto. 
+    unfold inSMI. destruct e. 
+    - destruct p. all: simpl;auto. 
+    - destruct m0. all: simpl;auto. 
     - auto.
 Qed.
 
@@ -273,17 +164,17 @@ Qed.
 
 Definition execs (P:Protocol) := seq (exec_evt P).
 
-Definition compatible_spec (P:Protocol) (s:modulee) : Prop :=
+Definition compatible_spec (P:Protocol) (s:module) : Prop :=
     Ip P = I s /\ Op P = O s.
     
-Definition spec_of (P:Protocol) := { s:modulee | compatible_spec P s}.
+Definition spec_of (P:Protocol) := { s:module | compatible_spec P s}.
 
 Definition convert_type (I I' : Type) (p_eq : I = I') (i : I ) : I' := eq_rect I (fun X => X) i I' p_eq.
 Definition convert_set (I I' : Set) (p_eq : I = I') (i : I ) : I' := eq_rect I (fun X => X) i I' p_eq.
 
     
 (* convert protocol io events into its spec io events  *)
-Definition convert_io {P:Protocol} (io : protocol_io P) (s: modulee) (comp_proof : compatible_spec P s) : module_io s :=
+Definition convert_io {P:Protocol} (io : protocol_io P) (s: module) (comp_proof : compatible_spec P s) : module_io s :=
     match io with
         | p_evt_in  n in' => m_evt_in (l s) n (convert_type (proj1 comp_proof) in')
         | p_evt_out  n out' => m_evt_out (l s) n (convert_type (proj2 comp_proof) out')
@@ -291,10 +182,10 @@ Definition convert_io {P:Protocol} (io : protocol_io P) (s: modulee) (comp_proof
 
 
 (* convert protocol execs into sequences that can be fed to its specification admissibility predicate.  *)
-CoFixpoint strip_exec (P:Protocol) (s: modulee) (comp_proof : compatible_spec P s) (E: execs P) : seq (module_xioc s) :=
+CoFixpoint strip_exec (P:Protocol) (s: module) (comp_proof : compatible_spec P s) (E: execs P) : seq (module_xioc s) :=
     match E  with
         | cons  e tl => let e' := match e with
-                | module m io => inl (inl tt)
+                | mod m io => inl (inl tt)
                 | prot io       => inl (inr (convert_io io comp_proof))
                 | corr c    => inr c
             end in cons e' (strip_exec comp_proof tl)
@@ -304,8 +195,9 @@ CoFixpoint strip_exec (P:Protocol) (s: modulee) (comp_proof : compatible_spec P 
 Require Import Coq.Program.Wf.
 
 
-(* the sate at the nth event is the state right *before* the nth event is processed *)
+(* the sate at the nth event is the state right *before* the nth event is processed by the SM*)
 (* the recursive call is bascally a destruct on (rangeproof i) *)
+(* You may notice that "index i = n" is unused. It is present to make it appear as an hypothesis of the proof of well-foundedness *)
 Program Fixpoint state_at (P:Protocol) (E : execs P) (i: indexOf E) (p:node) {measure (index i)} : State (SM P) :=
     match index i as n return isinIndex E n -> index i = n -> State (SM P) with
         | 0     => fun _ _ => S0 (SM P) 
@@ -318,6 +210,59 @@ Program Fixpoint state_at (P:Protocol) (E : execs P) (i: indexOf E) (p:node) {me
 Next Obligation. rewrite H. auto. Defined.
 
 
+
+
+Definition isNodeOut (P:Protocol) (e:exec_evt P) (p:node) : Prop := 
+    match e with 
+    | prot (p_evt_out p _) | mod _ (m_evt_in _ p _)  => True
+    | _ => False
+end.
+
+Definition isNodeIn  (P:Protocol) (e:exec_evt P) (p:node) : Prop := 
+    match e with 
+        | prot (p_evt_in p _)  | mod _ (m_evt_out _ p _) => True
+        | _ => False
+end.
+
+Lemma NodeOutEquivSMOView  (P:Protocol) (e:exec_evt P) (p:node) : isInNodeView e p /\ inSMO e <-> isNodeOut e p.
+Proof.
+    split. all:intros.
+    - unfold isNodeOut. destruct H. unfold isInNodeView in H. unfold inSMO in H0.  
+        repeat match goal with 
+        | s : match ?a with _ => _ end |- _ =>  destruct a
+        end. all: auto.
+    - split. unfold isInNodeView. unfold isNodeOut in H. 
+        repeat match goal with 
+        | s : match ?a with _ => _ end |- _ =>  destruct a
+        end. all:auto.
+Qed.
+
+Definition NodeOutConj (P:Protocol) {e:exec_evt P} {p:node}  (proof: isNodeOut e p) : isInNodeView e p /\ inSMO e :=  proj2 (NodeOutEquivSMOView e p) proof.
+
+
+Lemma NodeInEquivSMIView  (P:Protocol) (e:exec_evt P) (p:node) : isInNodeView e p /\ inSMI e <-> isNodeIn e p.
+split. all:intros.
+- unfold isNodeIn. destruct H. unfold isInNodeView in H. unfold inSMI in H0.  
+    repeat match goal with 
+    | s : match ?a with _ => _ end |- _ =>  destruct a
+    end. all: auto.
+- split. unfold isInNodeView. unfold isNodeIn in H. 
+    repeat match goal with 
+    | s : match ?a with _ => _ end |- _ =>  destruct a
+    end. all:auto.
+Qed.
+Definition NodeInConj (P:Protocol) {e:exec_evt P} {p:node}  (proof: isNodeIn e p) : isInNodeView e p /\ inSMI e :=  proj2 (NodeInEquivSMIView e p) proof.
+
+
+(*The SM output of node p' SM at event i, **before** (elem i) is processed *)
+Definition process_at (P:Protocol) (E : execs P) (i: indexOf E) (p:node) (pIn : isNodeIn (elem i) p)  : list {e: exec_evt P | isNodeOut e p} :=
+    fst (transition (SM P) (state_at i p) (makeSig (proj2 (NodeInConj pIn)))).
+
+Definition process_at_asSMO (P:Protocol) (E : execs P) (i: indexOf E) (p:node) (pIn : isNodeIn (elem i) p) : SMO P :=
+    (process_at i p pIn) (*? is there some implicit coercions i'm not aware of? *)
+.
+
+
 End Protocols.
 
 Section Models.
@@ -327,10 +272,12 @@ Definition leibniz {T:Type} (x y : T) (p_eq: x = y) (P: T -> Type) : P y -> P x.
     intros. subst y. exact X. 
 Defined.
 
-(* downcast protocol execs event into events that can be fed to module m' admissibility predicate. All events that s cannot process a replaced by unit *)
+
+
+(* downcast protocol execs event into events that can be fed to mod m' admissibility predicate. All events that m cannot process is replaced by unit *)
 Definition clamped_evt (P:Protocol) (m: listidx.indexOf (M P)) (e: exec_evt P)  : module_xioc (nth_checked m)  := 
     match e with
-        | module  m' mio =>  match (Nat.eq_dec (listidx.index m) (listidx.index m')) with
+        | mod  m' mio =>  match (PeanoNat.Nat.eq_dec (listidx.index m) (listidx.index m')) with
             | left eq_proof => inl (inr  (leibniz (rangeproof_irreverant m m' eq_proof) module_io mio))
             | right _       => inl (inl tt)
         end
@@ -341,39 +288,65 @@ Definition clamped_evt (P:Protocol) (m: listidx.indexOf (M P)) (e: exec_evt P)  
 Definition  module_admissible (P:Protocol) (E:execs P) : Prop := 
     forall m: (listidx.indexOf (M P)), A (map E (clamped_evt m) ).
 
+ Definition DelayPred := forall (P:Protocol) (E:execs P) (i:indexOf E) (p:node),  Prop. 
 
-Definition  corrupt_at (P:Protocol) (E:execs P) (i : indexOf E)  (p:node) : Prop :=
+Definition staticAdv := fun (P:Protocol) (E:execs P) (i : indexOf E)  (p:node) => True.
+Definition staticAdv' : DelayPred := fun _ _ _ _ => True.
+
+Definition  corrupt_at (P:Protocol) (E:execs P) (D: DelayPred) (i : indexOf E)  (p:node)  : Prop :=
     exists (j:indexOf E), match elem j with
-        | corr (corruption p) => index j < index i
+        | corr (corruption p) => index j < index i /\ D P E i p
         | _ => False 
         end.
 
-Definition corrupt (P:Protocol) (E:execs P) (p:node) : Prop :=
-    exists (i : indexOf E), corrupt_at i p.
+Definition corrupt (P:Protocol) (E:execs P) (D: DelayPred) (p:node) : Prop :=
+    exists (i : indexOf E), corrupt_at D i p.
 
-Definition honest_at (P:Protocol) (E:execs P) (i : indexOf E)  (p:node) : Prop :=
-    ~ corrupt_at i p.
+Definition honest_at (P:Protocol) (E:execs P) (D: DelayPred) (i : indexOf E)  (p:node)  : Prop :=
+    ~ corrupt_at D i p.
 
-Definition honest (P:Protocol) (E:execs P)  (p:node) : Prop :=
-    ~ corrupt E p.
+Definition honest (P:Protocol) (E:execs P) (D: DelayPred) (p:node)  : Prop :=
+    ~ corrupt E D p.
 
 
-
-Definition honest_admissible (P:Protocol) (E:execs P) : Prop := 
-    forall (i : indexOf E), match elem i with
-        |  prot (p_evt_in p ip) | module _ (m_evt_out _ p ip) => 
-            isPrefixOf (process (SM P) 
-                                (List.cons (nth (listidx.mkIndex (listidx.IO (List.map O (M P)) (Ip P))) ip) List.nil)) 
-                       (tail i)
-        | _ => False
-        end.  
-
+(* honest node admissibility : when an honest node receives input, all the following events are the node output. I.e., honest nodes follows the protocol *)
+Definition honest_admissible (P:Protocol) (D: DelayPred) (E:execs P) : Prop := 
+    forall (i : indexOf E), exists (p:node), forall pIn : (isNodeIn (elem i) p), honest_at D i p ->
+    isPrefixOf (List.map (proj1_sig (P:=fun x=> isNodeOut x p)) (process_at i p pIn) )
+               (tail i)
+.
+(* note to self: in this version, the adversary is NOT authorized to reorder outputs ! may need to fix *)
     
-Definition model (P:Protocol) (E:execs P) : Prop := module_admissible E.
 
 
-Definition satisfies (P: Protocol)  (s:spec_of P) (s: modulee ) (comp_proof : compatible_spec P s) : Prop  :=
-    forall E:execs P, model E -> A (strip_exec comp_proof E)
+
+Definition corruption_struct := (node -> Prop) -> Prop.
+
+Definition k_cover (C:corruption_struct) (k:nat) := 
+    exists (pi: {n:nat | n<k} -> (node->Prop)),
+    forall (p: node) (pi_n: {n:nat | n<k}),
+    pi pi_n p
+.
+
+Record adversary_struct : Type := {
+    C : corruption_struct;
+    D : DelayPred;
+}.
+
+(* respects a given corruption structure*)
+Definition structure_admissible (P:Protocol) (Adv:adversary_struct) (E:execs P)  : Prop := 
+    forall (i:indexOf E), (C Adv) (corrupt_at (D Adv) i)
+.
+
+(* E is part of the model of P iff all admissibility requirements are met*)
+Definition model (P:Protocol) (Adv:adversary_struct) (E:execs P) : Prop := 
+    module_admissible E   /\
+    honest_admissible (D Adv) E /\
+    structure_admissible Adv E.
+
+
+Definition satisfies (P: Protocol) (Adv:adversary_struct)  (s:spec_of P) (s: module ) (comp_proof : compatible_spec P s) : Prop  :=
+    forall E:execs P, model Adv E -> A (strip_exec comp_proof E)
 .
 
 End Models.
