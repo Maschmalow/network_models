@@ -7,12 +7,32 @@ Require Import String.
 
 From networks Require Import listidx.
 From networks Require Import sequences.
+From Coq Require Import Logic.FinFun.
+
+Section finTypes.
+(* why don't I use ssreflect.fintype? 
+1) importing it breaks proofs 2) Looking at the source, I don't really understant how it's implemented,
+  which, according to my limited experience, means it will be difficult to use  *)
+
+Record ordinal (n:nat) := {
+    val :> nat;
+    pIneq   : val < n;
+}.
+
+
+Definition isFinite (T:Type) : Prop := 
+    exists (n:nat)  (f : T->ordinal n), Injective f.
+
+
+End finTypes.
+
+
 
 Set Implicit Arguments.
 
 
 Variable nodeCount : nat.
-Definition node := { n:nat | n < nodeCount}.
+Definition node := ordinal nodeCount.
 Definition label := nat.
 
 Section modules.
@@ -32,13 +52,22 @@ Inductive corruption_evt   :=
     | corruption : node -> corruption_evt
 .
 
+Variant module_xioc_t ( I O : Type) : Type :=
+    | m_blank : module_xioc_t I O
+    | m_io : module_io_t I O -> module_xioc_t I O
+    | m_corr : corruption_evt -> module_xioc_t I O.
+
+#[global]Arguments m_blank {I O}%type_scope.
+#[global]Arguments m_io [I O]%type_scope _.
+#[global]Arguments m_corr [I O]%type_scope _.
+
 
 Record module : Type :=  {
     l : label;
     I : Type;
     O : Type;
     module_io : Type := module_io_t I O;
-    module_xioc : Type := unit + module_io + corruption_evt;
+    module_xioc : Type := module_xioc_t I O;
     A : seq module_xioc -> Prop
 }.
 
@@ -82,18 +111,6 @@ Variant exec_evt_t  (I O : Type) (M: list module)  :=
 #[global]Arguments prot [I O]%type_scope [M]%list_scope _.
 #[global]Arguments mod [I O]%type_scope [M]%list_scope m _.
 #[global]Arguments corr [I O]%type_scope [M]%list_scope _.
-(*
- Definition in_SMI_t (I O : Type) (M: list module) (e:exec_evt_t I O M) : Prop := 
-    match e with
-        | prot (p_evt_in _ _) | mod _ (m_evt_out _ _ _) => True
-        | _ => False
-    end.
-
-Definition in_SMO_t (I O : Type) (M: list module) (e:exec_evt_t I O M) : Prop := 
-    match e with
-        | prot (p_evt_out _ _) | mod _ (m_evt_in _ _ _) => True
-        | _ => False
-    end. *)
 
 
 Record Protocol := {
@@ -105,8 +122,6 @@ Record Protocol := {
     prot_p := prot (I:=Ip) (O:=Op) (M:=M);
     module_p := mod (I:=Ip) (O:=Op) (M:=M);
     corr_p := corr (I:=Ip) (O:=Op) (M:=M);
-    (* inSMI := in_SMI_t (I:=Ip) (O:=Op) (M:=M);
-    inSMO := in_SMO_t (I:=Ip) (O:=Op) (M:=M); *)
 
     (* all definitions required to define the state machine I/O types needs to be inlined within the record def*)
     inSMI := fun (e:exec_evt) => match e with
@@ -117,6 +132,7 @@ Record Protocol := {
                 | prot (p_evt_out _ _) | mod _ (m_evt_in _ _ _) => True
                 | _ => False
               end;
+              
     SMI := {e:exec_evt | inSMI e};
     SMO := list {e:exec_evt | inSMO e};
     SM : stateMachine SMI SMO;
@@ -185,9 +201,9 @@ Definition convert_io {P:Protocol} (io : protocol_io P) (s: module) (comp_proof 
 CoFixpoint strip_exec (P:Protocol) (s: module) (comp_proof : compatible_spec P s) (E: execs P) : seq (module_xioc s) :=
     match E  with
         | cons  e tl => let e' := match e with
-                | mod m io => inl (inl tt)
-                | prot io       => inl (inr (convert_io io comp_proof))
-                | corr c    => inr c
+                | mod m io => m_blank
+                | prot io  => m_io (convert_io io comp_proof)
+                | corr c   => m_corr c
             end in cons e' (strip_exec comp_proof tl)
         | nil _     => nil (module_xioc s)
     end.
@@ -197,7 +213,7 @@ Require Import Coq.Program.Wf.
 
 (* the sate at the nth event is the state right *before* the nth event is processed by the SM*)
 (* the recursive call is bascally a destruct on (rangeproof i) *)
-(* You may notice that "index i = n" is unused. It is present to make it appear as an hypothesis of the proof of well-foundedness *)
+(* You may notice that "index i = n" is unused. It is present to make it appear as an hypothesis in the proof of well-foundedness *)
 Program Fixpoint state_at (P:Protocol) (E : execs P) (i: indexOf E) (p:node) {measure (index i)} : State (SM P) :=
     match index i as n return isinIndex E n -> index i = n -> State (SM P) with
         | 0     => fun _ _ => S0 (SM P) 
@@ -274,24 +290,30 @@ Defined.
 
 
 
-(* downcast protocol execs event into events that can be fed to mod m' admissibility predicate. All events that m cannot process is replaced by unit *)
+(* downcast protocol execs event into events that can be fed to mod m' admissibility predicate. Any event that m cannot process is replaced by unit *)
 Definition clamped_evt (P:Protocol) (m: listidx.indexOf (M P)) (e: exec_evt P)  : module_xioc (nth_checked m)  := 
     match e with
         | mod  m' mio =>  match (PeanoNat.Nat.eq_dec (listidx.index m) (listidx.index m')) with
-            | left eq_proof => inl (inr  (leibniz (rangeproof_irreverant m m' eq_proof) module_io mio))
-            | right _       => inl (inl tt)
+            | left eq_proof => m_io (leibniz (rangeproof_irreverant m m' eq_proof) module_io mio)
+            | right _       => m_blank
         end
-        | corr c => inr c
-        | _        =>  inl (inl tt)
+        | corr c => m_corr c
+        | _      => m_blank
     end. 
 
+(* module admissibility : executions must be admissible according to all modules *)
 Definition  module_admissible (P:Protocol) (E:execs P) : Prop := 
     forall m: (listidx.indexOf (M P)), A (map E (clamped_evt m) ).
 
- Definition DelayPred := forall (P:Protocol) (E:execs P) (i:indexOf E) (p:node),  Prop. 
 
-Definition staticAdv := fun (P:Protocol) (E:execs P) (i : indexOf E)  (p:node) => True.
-Definition staticAdv' : DelayPred := fun _ _ _ _ => True.
+(* adversarial adaptivity *)
+ Definition DelayPred := forall (P:Protocol) (E:execs P) (i:indexOf E) (p:node),  Prop. 
+ (* Inductive DelayPred  :=  
+    | static : DelayPred 
+    | delayPred : forall (P:Protocol) (E:execs P) (i:indexOf E) (p:node),  Prop. *)
+
+ Definition staticAdvPred := fun (P:Protocol) (E:execs P) (i:indexOf E) (p:node) => True.
+ Definition dynamicAdv : DelayPred := fun _ _ _ _ => False.
 
 Definition  corrupt_at (P:Protocol) (E:execs P) (D: DelayPred) (i : indexOf E)  (p:node)  : Prop :=
     exists (j:indexOf E), match elem j with
@@ -333,7 +355,7 @@ Record adversary_struct : Type := {
     D : DelayPred;
 }.
 
-(* respects a given corruption structure*)
+(* respects a given corruption structure. Also handles the logic for static adversaries*)
 Definition structure_admissible (P:Protocol) (Adv:adversary_struct) (E:execs P)  : Prop := 
     forall (i:indexOf E), (C Adv) (corrupt_at (D Adv) i)
 .
@@ -345,9 +367,77 @@ Definition model (P:Protocol) (Adv:adversary_struct) (E:execs P) : Prop :=
     structure_admissible Adv E.
 
 
-Definition satisfies (P: Protocol) (Adv:adversary_struct)  (s:spec_of P) (s: module ) (comp_proof : compatible_spec P s) : Prop  :=
+Definition satisfies (P: Protocol) (Adv:adversary_struct)  (s: module )  : Prop  :=
+    forall comp_proof : compatible_spec P s,
     forall E:execs P, model Adv E -> A (strip_exec comp_proof E)
 .
 
 End Models.
+
+Section modules_lib.
+    
+
+
+
+
+Definition isModuleOut_t I O (e:module_xioc_t I O)  : Prop := 
+    match e with 
+    |  m_io (m_evt_out _ p _)  => True
+    | _ => False
+end.
+Definition isModuleOut (M:module) (e:module_xioc M) := isModuleOut_t e.
+
+Definition isModuleIn_t I O (e:module_xioc_t I O) : Prop := 
+    match e with 
+    |  m_io (m_evt_in _ p _)  => True
+    | _ => False
+end.
+
+(* there must be a better way than doing this.*)
+Definition  as_I (M : Type) (pFiniteM : isFinite M) : Type  := node * M.
+Definition  as_O (M : Type) (pFiniteM : isFinite M) : Type := node * M.
+Definition as_l := 45.
+
+Definition  async_network (M : Type) (pFiniteM : isFinite M) : module := {|
+
+    l := as_l; (* 45 = AS *)
+    I := as_I pFiniteM;
+    O := as_O pFiniteM;
+
+    A := fun seq_xioc  =>
+        let mod_outs := (subseq seq_xioc (isModuleIn_t (O:=as_O pFiniteM) (I:=as_I pFiniteM))) in
+        let mod_ins  := (subseq seq_xioc (isModuleOut_t (O:=as_O pFiniteM) (I:=as_I pFiniteM))) in
+        (exists (recpt: mod_outs -> mod_ins), 
+            Bijective recpt ->
+            (forall (e:mod_outs) (p q :node) (m : M), (elem (i e) = (m_io (m_evt_in as_l p (pair q m)))) ->
+                        elem (i (recpt e)) = (m_io (m_evt_out as_l q (pair p m))) ) ->
+            (forall e, index (i (recpt e)) > index (i e)))   
+|}.
+
+End modules_lib.
+
+
+
+Section reductions.
+
+
+Definition strongestAdv : adversary_struct := {| C:=  fun _ => True ; D := dynamicAdv |}.
+
+Import List.ListNotations.
+Open Scope list_scope.
+
+Definition reduces_strict  ( S W : module) :=
+    exists (P:Protocol), M P = [ S ] ->
+    satisfies P strongestAdv W
+.
+
+
+
+
+Definition reduces_weak  ( S W : module) :=
+    exists (P:Protocol), M P = [ S ] ->
+    satisfies P strongestAdv W
+.
+
+End reductions.
 

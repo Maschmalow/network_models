@@ -60,14 +60,6 @@ Definition makeSig (A : Type) (P : A -> Prop) (x : A) (p : P x) : sig P :=
 #[global]Arguments makeSig [A]%type_scope [P]%function_scope [x] p.
 
 
-(* 
-Definition destructIndex {A:Type} {s:seq A} (i:indexOf s) :  
-    (index i = 0) + (exists (a:A) (n:nat) (p:isinIndex (cons a s) (S n)), (index i = S n)).
-Proof.
-    destruct i. simpl. destruct x. auto. right.  destruct s. apply nil_impossible in i. contradiction.
-    exists a. exists x.  *)
-     
-
 
 Theorem absurd_type : forall (A:Prop) (C:Type), A -> ~ A -> C.
 Proof.
@@ -128,6 +120,12 @@ Fixpoint asSeq (A:Type) (l : list A) : seq A :=
         | List.nil => nil
     end.
 
-Definition subseq {A:Type} (s:seq A) (P: A -> Prop) := { i:indexOf s | P (elem i)}.
+
+    
+Record subseq {A:Type} (s:seq A) (P: A -> Prop) := {
+    i : indexOf s;
+    p : P (elem i);
+}.
+
 
 End sequences.
