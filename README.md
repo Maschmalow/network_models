@@ -10,3 +10,5 @@ This project is a learning ground, questionable code lies ahead.
   - associated events, executions as sequences of events, nodes states and IO during execution
   - admissibility predicates for : modules admissibilty predicates, execution of the protocol by honest nodes, corruption structures
   - satisfication of module specification by a protocol
+  - the 'asynchronous network' module
+  - reductions between modules
