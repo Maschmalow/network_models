@@ -404,7 +404,7 @@ Definition  async_network (M : Type) (pFiniteM : isFinite M) : module := {|
     I := as_I pFiniteM;
     O := as_O pFiniteM;
 
-    A := fun seq_xioc  =>
+    A := fun seq_xioc : seq (module_xioc_t (as_I pFiniteM) (as_O pFiniteM))  =>
         let mod_outs := (subseq seq_xioc (isModuleIn_t (O:=as_O pFiniteM) (I:=as_I pFiniteM))) in
         let mod_ins  := (subseq seq_xioc (isModuleOut_t (O:=as_O pFiniteM) (I:=as_I pFiniteM))) in
         (exists (recpt: mod_outs -> mod_ins), 
@@ -412,6 +412,78 @@ Definition  async_network (M : Type) (pFiniteM : isFinite M) : module := {|
             (forall (e:mod_outs) (p q :node) (m : M), (elem (i e) = (m_io (m_evt_in as_l p (pair q m)))) ->
                         elem (i (recpt e)) = (m_io (m_evt_out as_l q (pair p m))) ) ->
             (forall e, index (i (recpt e)) > index (i e)))   
+|}.
+
+
+Definition sig_string := nat. (* signatures are represented as a nat, for now*)
+
+Variant sig_I (M : Type) (pFiniteM : isFinite M) : Type  := 
+    | sign : M -> sig_I pFiniteM
+    | verify : M -> sig_string -> node ->  sig_I pFiniteM
+.
+Variant sig_O (M : Type) (pFiniteM : isFinite M) : Type :=
+    | sign_result : sig_string -> sig_O pFiniteM
+    | verify_result : bool ->  sig_O pFiniteM
+.
+Definition sig_l := 516. (* 516 = SIG*)
+
+Definition module_returns (A: Type) (s : seq A) (i : indexOf s) (ret : A) : Prop :=
+    exists (pJ : isinIndex s (index i+1)), elem (mkIndex pJ) = ret.
+
+(* checks whether sigma is a valid signature from q emitted before (or at) i *)
+(* same thing than with state computation *)
+Program Fixpoint signature_valid (M : Type)  (pFiniteM : isFinite M) (seq_xioc : seq (module_xioc_t (sig_I pFiniteM) (sig_O pFiniteM)) )  (sigma : sig_string) (q : node) (m:M) 
+                                (i : indexOf seq_xioc) {measure (index i)} : bool :=
+    (match (index i) as i_nat return isinIndex seq_xioc i_nat -> index i = i_nat -> bool with 
+        | S i' => fun (p : isinIndex seq_xioc (S i')) (_ : index i = (S i')) => let recursive_call := signature_valid sigma q m (mkIndex (skip_one p)) in
+                                                        match (elem (mkIndex (skip_one p))) with
+                                                            | m_io (m_evt_in sig_l q (sign _ m)) => match elem i with 
+                                                                                                        | (m_io (m_evt_out sig_l q (sign_result _ sigma))) => true
+                                                                                                        | _ => recursive_call
+                                                                                                    end
+                                                            | _ => recursive_call
+                                                        end
+        | O    => fun _ _ => false
+    end) (rangeproof i) (eq_refl (index i))  
+.
+Next Obligation. rewrite H0. auto. Defined.
+
+
+Definition  signaturesPKI (M : Type) (pFiniteM : isFinite M) : module := {|
+
+    l := sig_l; 
+    I := sig_I pFiniteM;
+    O := sig_O pFiniteM;
+
+    A := fun seq_xioc : seq (module_xioc_t (sig_I pFiniteM) (sig_O pFiniteM))  => 
+    forall i:(indexOf seq_xioc), match (elem i) with
+        | m_io (m_evt_in sig_l p (sign _ m)) => exists (sigma : sig_string), module_returns i (m_io (m_evt_out sig_l p (sign_result _ sigma))) (*sign returns sigma*)
+        | m_io (m_evt_in sig_l p (verify _ m sigma q )) => module_returns i (m_io (m_evt_out sig_l p (verify_result _ (signature_valid sigma q m i))))
+        | _ => True
+    end;
+
+|}.
+
+Definition  mc_I (M : module) (count : nat) : Type := (ordinal count) * I M.
+Definition  mc_O (M : module) (count : nat) : Type := (ordinal count) * O M.
+Definition mc_l := 0. (* idk *)
+
+Definition module_copies (M : module) (count : nat) : module := {|
+    l := mc_l; 
+    I := mc_I M count;
+    O := mc_O M count;
+
+    A := fun s : seq (module_xioc_t (mc_I M count) (mc_O M count)) => 
+    forall Mid : (ordinal count), exists i: indexOf s, exists n in' out',
+        (elem i =  m_io (m_evt_in mc_l n (Mid, in')) \/ elem i =  m_io (m_evt_out mc_l n (Mid, out')) ) ->
+        let subs : seq (module_xioc_t (I M) (O M)) := 
+            map (B:= module_xioc_t (I M) (O M)) s (fun e => match e with
+                | m_io (m_evt_in  mc_l n' (Mid, in'') ) => m_io  (m_evt_in  mc_l n' in'' )
+                | m_io (m_evt_out mc_l n' (Mid, out'') ) => m_io (m_evt_out mc_l n' out'' )
+                | m_blank => m_blank
+                | m_corr n' => m_corr n'
+            end) in
+        A subs;
 |}.
 
 End modules_lib.
@@ -435,7 +507,8 @@ Definition reduces_strict  ( S W : module) :=
 
 
 Definition reduces_weak  ( S W : module) :=
-    exists (P:Protocol), M P = [ S ] ->
+    exists (P:Protocol),
+    exists (M_as : Type) (p_as: isFinite M_as) (M_sig : Type) (p_sig: isFinite M_sig) (count : nat), M P = [ S; signaturesPKI p_sig; async_network p_as; module_copies S count ] ->
     satisfies P strongestAdv W
 .
 
